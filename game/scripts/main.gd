@@ -73,8 +73,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var key_event := event as InputEventKey
 		if key_event.pressed and not key_event.echo and key_event.physical_keycode == KEY_ESCAPE:
 			if state == GameState.DIFFICULTY_SELECT:
-				state = GameState.MAIN_MENU
-				queue_redraw()
+				_go_to_main_menu()
 			elif state == GameState.CHARACTER_SELECT:
 				state = GameState.DIFFICULTY_SELECT
 				queue_redraw()
@@ -113,11 +112,9 @@ func _unhandled_input(event: InputEvent) -> void:
 
 		GameState.RESULT:
 			if retry_button.has_point(pos):
-				state = GameState.DIFFICULTY_SELECT
-				queue_redraw()
+				_go_to_difficulty_select()
 			elif main_button.has_point(pos):
-				state = GameState.MAIN_MENU
-				queue_redraw()
+				_go_to_main_menu()
 
 func _start_battle() -> void:
 	# CPU는 플레이어와 다른 캐릭터를 우선 선택.
@@ -617,3 +614,30 @@ func _draw_button(rect: Rect2, text: String, font: Font, color: Color) -> void:
 		23,
 		Color.WHITE
 	)
+
+func _go_to_main_menu() -> void:
+	# 전투 중 남아 있던 투사체와 캐릭터를 모두 정리한다.
+	_clear_projectiles()
+
+	player.set_active(false)
+	enemy.set_active(false)
+
+	player.visible = false
+	enemy.visible = false
+
+	state = GameState.MAIN_MENU
+	queue_redraw()
+
+
+func _go_to_difficulty_select() -> void:
+	# 재대전 시에도 이전 전투의 캐릭터와 투사체가 선택 화면에 남지 않게 한다.
+	_clear_projectiles()
+
+	player.set_active(false)
+	enemy.set_active(false)
+
+	player.visible = false
+	enemy.visible = false
+
+	state = GameState.DIFFICULTY_SELECT
+	queue_redraw()
