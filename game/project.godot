@@ -1,11 +1,9 @@
-; Engine configuration file.
-; River Duel starter project
-
+; SkillDuel - Godot 4.7.2
 config_version=5
 
 [application]
 
-config/name="River Duel"
+config/name="SkillDuel"
 run/main_scene="res://scenes/Main.tscn"
 
 [display]
@@ -20,4 +18,3 @@ window/stretch/mode="canvas_items"
 
 renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
-textures/default_filters/use_nearest_mipmap_filter=false
