@@ -33,6 +33,7 @@ var cast_timer: float = 0.0
 var dash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
 var deflect_timer: float = 0.0
+var hit_flash_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -90,6 +91,7 @@ func reset_for_battle() -> void:
 	dash_timer = 0.0
 	invulnerable_timer = 0.0
 	deflect_timer = 0.0
+	hit_flash_timer = 0.0
 	terrain_speed_multiplier = 1.0
 	terrain_is_ice = false
 
@@ -115,6 +117,7 @@ func _physics_process(delta: float) -> void:
 	dash_timer = maxf(0.0, dash_timer - delta)
 	invulnerable_timer = maxf(0.0, invulnerable_timer - delta)
 	deflect_timer = maxf(0.0, deflect_timer - delta)
+	hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
 
 	if deflect_timer > 0.0:
 		_process_deflect()
@@ -377,23 +380,24 @@ func _use_q_skill() -> void:
 				540.0
 			)
 
-		# LYRA Q: 매우 빠르고 긴 사거리의 강화 화살
+		# LYRA Q: 초장거리 Piercing Shot.
+		# 속도가 매우 빠르고 2회 관통한다.
 		1:
-			q_cooldown = 2.7
+			q_cooldown = 3.2
 
 			_spawn_from_self(
 				aim,
-				1350.0,
-				46,
-				7.0,
-				Color(1.0, 0.62, 0.12),
+				1500.0,
+				52,
+				6.0,
+				Color(1.0, 0.68, 0.12),
 				2,
 				2,
-				1600.0,
-				1,
+				1800.0,
+				2,
 				0.0,
 				0.0,
-				360.0
+				480.0
 			)
 
 		# SERA Q: 크고 짧은 Crescent Slash
@@ -424,37 +428,28 @@ func _use_e_skill() -> void:
 	var aim := _aim_direction()
 
 	match character_index:
-		# ARIA E: 서로 반대 방향으로 굽는 2개의 마력 결정
+		# ARIA E: Arcane Spiral.
+		# 6개의 마력 파편이 서로 다른 곡선 궤적으로 공간을 막는다.
 		0:
-			e_cooldown = 4.2
+			e_cooldown = 5.0
 
-			_spawn_from_self(
-				aim,
-				700.0,
-				26,
-				9.0,
-				Color(0.62, 0.40, 1.0),
-				5,
-				1,
-				1000.0,
-				0,
-				42.0,
-				6.0
-			)
+			for i in range(6):
+				var side: float = -1.0 if i % 2 == 0 else 1.0
+				var angle_offset: float = float(i - 2) * 0.055
 
-			_spawn_from_self(
-				aim,
-				700.0,
-				26,
-				9.0,
-				Color(0.82, 0.55, 1.0),
-				5,
-				1,
-				1000.0,
-				0,
-				-42.0,
-				6.0
-			)
+				_spawn_from_self(
+					aim.rotated(angle_offset),
+					620.0 + float(i) * 24.0,
+					15,
+					7.0,
+					Color(0.58 + float(i) * 0.045, 0.36, 1.0),
+					5,
+					1,
+					950.0,
+					0,
+					side * (28.0 + float(i) * 7.0),
+					5.2 + float(i) * 0.22
+				)
 
 		# LYRA E: 부채꼴 5연사
 		1:
@@ -667,6 +662,7 @@ func take_damage(amount: int) -> void:
 		return
 
 	hp = maxi(0, hp - amount)
+	hit_flash_timer = 0.12
 	queue_redraw()
 
 	if hp <= 0:
@@ -732,6 +728,13 @@ func _draw() -> void:
 		draw_rect(
 			Rect2(Vector2(-26.0, -38.0), Vector2(52.0, 4.0)),
 			Color(1.0, 1.0, 1.0, 0.35)
+		)
+
+
+	if hit_flash_timer > 0.0:
+		draw_rect(
+			Rect2(Vector2(-28.0, -39.0), Vector2(56.0, 82.0)),
+			Color(1.0, 0.86, 0.86, 0.32)
 		)
 
 

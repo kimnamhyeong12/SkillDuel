@@ -17,19 +17,29 @@ var active: bool = false
 var difficulty: int = 0
 var character_index: int = 1
 var character_name: String = "LYRA"
+var map_index: int = 0
 
 var move_speed: float = 110.0
 var terrain_speed_multiplier: float = 1.0
 var terrain_is_ice: bool = false
+
 var attack_interval: float = 1.6
 var attack_damage: int = 11
 var aim_spread: float = 0.10
+var prediction_time: float = 0.0
 
-var shoot_cooldown: float = 1.0
-var skill_cooldown: float = 4.5
+var basic_cooldown: float = 1.0
+var q_cooldown: float = 2.0
+var e_cooldown: float = 3.0
+var shift_cooldown: float = 3.0
+var r_cooldown: float = 8.0
+var think_timer: float = 0.0
+
 var move_target: Vector2 = Vector2(980.0, 145.0)
-var decision_timer: float = 0.0
 var deflect_timer: float = 0.0
+var hit_flash_timer: float = 0.0
+var dash_timer: float = 0.0
+var invulnerable_timer: float = 0.0
 
 var rng := RandomNumberGenerator.new()
 
@@ -41,33 +51,37 @@ func _ready() -> void:
 	queue_redraw()
 
 
-func configure(new_difficulty: int, new_character_index: int) -> void:
+func configure(
+	new_difficulty: int,
+	new_character_index: int,
+	new_map_index: int = 0
+) -> void:
 	difficulty = new_difficulty
 	character_index = new_character_index
-
+	map_index = new_map_index
 	character_name = ["ARIA", "LYRA", "SERA"][character_index]
 
 	match difficulty:
 		0:
-			move_speed = 105.0
-			attack_interval = 1.65
+			move_speed = 110.0
+			attack_interval = 1.60
 			attack_damage = 10
-			aim_spread = 0.20
-			skill_cooldown = 6.5
+			aim_spread = 0.18
+			prediction_time = 0.0
 
 		1:
-			move_speed = 165.0
-			attack_interval = 1.10
-			attack_damage = 15
-			aim_spread = 0.08
-			skill_cooldown = 4.5
+			move_speed = 170.0
+			attack_interval = 1.05
+			attack_damage = 14
+			aim_spread = 0.075
+			prediction_time = 0.16
 
 		2:
-			move_speed = 235.0
-			attack_interval = 0.72
-			attack_damage = 20
+			move_speed = 230.0
+			attack_interval = 0.68
+			attack_damage = 18
 			aim_spread = 0.025
-			skill_cooldown = 3.2
+			prediction_time = 0.34
 
 	hp = MAX_HP
 	queue_redraw()
@@ -96,14 +110,21 @@ func reset_for_battle() -> void:
 	position = Vector2(980.0, 145.0)
 	velocity = Vector2.ZERO
 
-	shoot_cooldown = attack_interval * 0.65
-	skill_cooldown = 2.8 + float(difficulty)
+	basic_cooldown = attack_interval * 0.75
+	q_cooldown = 2.3
+	e_cooldown = 3.4
+	shift_cooldown = 2.8
+	r_cooldown = 9.0
+	think_timer = 0.15
 
-	decision_timer = 0.0
 	move_target = Vector2(920.0, 145.0)
+
 	terrain_speed_multiplier = 1.0
 	terrain_is_ice = false
 	deflect_timer = 0.0
+	hit_flash_timer = 0.0
+	dash_timer = 0.0
+	invulnerable_timer = 0.0
 
 	queue_redraw()
 
@@ -112,18 +133,299 @@ func _physics_process(delta: float) -> void:
 	if not active:
 		return
 
-	deflect_timer = maxf(0.0, deflect_timer - delta)
+	_update_timers(delta)
 
 	if deflect_timer > 0.0:
 		_process_deflect()
 
-	decision_timer -= delta
+	think_timer -= delta
 
-	if decision_timer <= 0.0:
-		_choose_move_target()
+	if think_timer <= 0.0:
+		think_timer = _get_think_interval()
+		_think()
 
-	var to_target := move_target - position
+	_move_ai()
+	queue_redraw()
 
+
+func _update_timers(delta: float) -> void:
+	basic_cooldown = maxf(0.0, basic_cooldown - delta)
+	q_cooldown = maxf(0.0, q_cooldown - delta)
+	e_cooldown = maxf(0.0, e_cooldown - delta)
+	shift_cooldown = maxf(0.0, shift_cooldown - delta)
+	r_cooldown = maxf(0.0, r_cooldown - delta)
+
+	deflect_timer = maxf(0.0, deflect_timer - delta)
+	hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+	dash_timer = maxf(0.0, dash_timer - delta)
+	invulnerable_timer = maxf(0.0, invulnerable_timer - delta)
+
+
+func _get_think_interval() -> float:
+	match difficulty:
+		0:
+			return rng.randf_range(0.55, 0.82)
+
+		1:
+			return rng.randf_range(0.25, 0.40)
+
+		2:
+			return rng.randf_range(0.10, 0.18)
+
+	return 0.4
+
+
+func _think() -> void:
+	var player := _get_player()
+
+	if player == null:
+		return
+
+	var incoming := _get_nearest_incoming_projectile()
+
+	# -----------------------------------------------------
+	# 난이도가 높을수록 '인지 → 대응'이 더 정확해진다.
+	# -----------------------------------------------------
+	if incoming != null:
+		var distance_to_threat: float = global_position.distance_to(
+			incoming.global_position
+		)
+
+		# SERA는 중/상 난이도에서 위험한 탄을 보고 E를 반응형으로 사용.
+		if character_index == 2 and e_cooldown <= 0.0:
+			var deflect_distance: float = (
+				95.0
+				if difficulty == 0
+				else 135.0
+				if difficulty == 1
+				else 180.0
+			)
+
+			if distance_to_threat <= deflect_distance:
+				var react_chance: float = [0.15, 0.62, 0.94][difficulty]
+
+				if rng.randf() <= react_chance:
+					_use_sera_deflect()
+					return
+
+		# 중/상 난이도는 위험한 투사체를 보고 회피 이동기 사용.
+		if shift_cooldown <= 0.0 and difficulty >= 1:
+			var dodge_distance: float = (
+				145.0
+				if difficulty == 1
+				else 220.0
+			)
+
+			if distance_to_threat <= dodge_distance:
+				var dodge_chance: float = (
+					0.42
+					if difficulty == 1
+					else 0.88
+				)
+
+				if rng.randf() <= dodge_chance:
+					_use_defensive_shift(incoming)
+					return
+
+	# -----------------------------------------------------
+	# 힐팩 판단.
+	# 초급은 잘 못 보고, 중급은 체력이 낮으면 노리며,
+	# 상급은 회복 또는 상대 힐팩 차단까지 고려한다.
+	# -----------------------------------------------------
+	var heal_pack := _get_heal_pack()
+
+	if heal_pack != null and basic_cooldown <= 0.0:
+		if _should_target_heal_pack(player):
+			_shoot_at_position(
+				heal_pack.global_position,
+				true
+			)
+			basic_cooldown = attack_interval
+			return
+
+	# -----------------------------------------------------
+	# 궁극기 판단.
+	# 상급일수록 상대 HP와 위치를 보고 더 적극적으로 사용.
+	# -----------------------------------------------------
+	if r_cooldown <= 0.0:
+		if _should_use_ultimate(player):
+			_use_r_skill(player)
+			return
+
+	# 캐릭터별 일반 스킬 판단
+	var skill_roll: float = rng.randf()
+
+	if q_cooldown <= 0.0 and skill_roll < [0.18, 0.42, 0.68][difficulty]:
+		_use_q_skill(player)
+		return
+
+	if e_cooldown <= 0.0 and skill_roll < [0.30, 0.62, 0.84][difficulty]:
+		_use_e_skill(player)
+		return
+
+	# 기본 공격
+	if basic_cooldown <= 0.0:
+		_shoot_basic()
+		basic_cooldown = attack_interval
+
+	# 이동 의사결정도 난이도별로 다름.
+	_choose_move_target(player, incoming)
+
+
+func _should_target_heal_pack(player: Node2D) -> bool:
+	if difficulty == 0:
+		return hp <= 75 and rng.randf() < 0.22
+
+	if difficulty == 1:
+		if hp <= 135:
+			return rng.randf() < 0.66
+
+		return false
+
+	# HARD:
+	# 체력이 조금이라도 깎였으면 적극적으로 회복.
+	if hp <= 175:
+		return rng.randf() < 0.90
+
+	# 본인은 거의 풀피여도 상대가 약하면 힐팩을 먼저 터뜨려 차단.
+	if "hp" in player and int(player.hp) <= 115:
+		return rng.randf() < 0.50
+
+	return false
+
+
+func _should_use_ultimate(player: Node2D) -> bool:
+	var player_hp: int = 200
+
+	if "hp" in player:
+		player_hp = int(player.hp)
+
+	match difficulty:
+		0:
+			return (
+				player_hp <= 55
+				and rng.randf() < 0.28
+			)
+
+		1:
+			return (
+				player_hp <= 105
+				and rng.randf() < 0.58
+			)
+
+		2:
+			if player_hp <= 135:
+				return rng.randf() < 0.92
+
+			return rng.randf() < 0.22
+
+	return false
+
+
+func _choose_move_target(
+	player: Node2D,
+	incoming: Node
+) -> void:
+	if difficulty == 0:
+		move_target = Vector2(
+			rng.randf_range(90.0, 1190.0),
+			rng.randf_range(70.0, 225.0)
+		)
+		return
+
+	# incoming projectile가 있으면 탄 진행 방향의 수직 방향으로 피한다.
+	if incoming != null and difficulty >= 1:
+		var projectile_dir: Vector2 = incoming.direction
+		var side := Vector2(
+			-projectile_dir.y,
+			projectile_dir.x
+		)
+
+		if rng.randf() < 0.5:
+			side = -side
+
+		var candidate := global_position + side * (
+			120.0
+			if difficulty == 1
+			else 190.0
+		)
+
+		candidate.x = clampf(candidate.x, MIN_X, MAX_X)
+		candidate.y = clampf(candidate.y, MIN_Y, MAX_Y)
+
+		if not _is_bad_position(candidate):
+			move_target = candidate
+			return
+
+	# 체력이 낮으면 상대와 x축 거리를 벌린다.
+	if hp <= 75 and difficulty == 2:
+		var flee_x: float = (
+			110.0
+			if player.global_position.x > global_position.x
+			else 1170.0
+		)
+
+		move_target = Vector2(
+			flee_x,
+			rng.randf_range(75.0, 220.0)
+		)
+		return
+
+	# 중급은 일반 스트레이프, 상급은 플레이어 진행방향 반대쪽을 더 선호.
+	var candidate := Vector2.ZERO
+
+	if difficulty == 1:
+		candidate = Vector2(
+			rng.randf_range(80.0, 1200.0),
+			rng.randf_range(70.0, 225.0)
+		)
+	else:
+		var lead_x: float = player.global_position.x
+
+		if "velocity" in player:
+			lead_x += player.velocity.x * 0.55
+
+		var offset_x: float = (
+			-230.0
+			if lead_x > global_position.x
+			else 230.0
+		)
+
+		candidate = Vector2(
+			global_position.x + offset_x + rng.randf_range(-120.0, 120.0),
+			rng.randf_range(65.0, 225.0)
+		)
+
+	candidate.x = clampf(candidate.x, MIN_X, MAX_X)
+	candidate.y = clampf(candidate.y, MIN_Y, MAX_Y)
+
+	# 비맵 물웅덩이 등 불리한 위치는 중/상 난이도에서 회피.
+	for attempt in range(5):
+		if not _is_bad_position(candidate):
+			break
+
+		candidate = Vector2(
+			rng.randf_range(80.0, 1200.0),
+			rng.randf_range(65.0, 225.0)
+		)
+
+	move_target = candidate
+
+
+func _is_bad_position(point: Vector2) -> bool:
+	if difficulty == 0:
+		return false
+
+	var scene := get_tree().current_scene
+
+	if scene != null and scene.has_method("is_ai_position_bad"):
+		return scene.is_ai_position_bad(point)
+
+	return false
+
+
+func _move_ai() -> void:
+	var to_target := move_target - global_position
 	var target_velocity := Vector2.ZERO
 
 	if to_target.length() > 8.0:
@@ -135,58 +437,20 @@ func _physics_process(delta: float) -> void:
 
 	if terrain_is_ice:
 		target_velocity *= 1.18
-		velocity = velocity.lerp(target_velocity, 0.085)
+		velocity = velocity.lerp(
+			target_velocity,
+			0.075 if difficulty == 0 else 0.10
+		)
 	else:
 		velocity = target_velocity
+
+	if dash_timer > 0.0:
+		velocity *= 1.30
 
 	move_and_slide()
 
 	position.x = clampf(position.x, MIN_X, MAX_X)
 	position.y = clampf(position.y, MIN_Y, MAX_Y)
-
-	shoot_cooldown -= delta
-	skill_cooldown -= delta
-
-	if shoot_cooldown <= 0.0:
-		shoot_cooldown = attack_interval
-		_shoot_basic()
-
-	if skill_cooldown <= 0.0:
-		skill_cooldown = _next_skill_delay()
-		_use_character_skill()
-
-	queue_redraw()
-
-
-func _choose_move_target() -> void:
-	match difficulty:
-		0:
-			decision_timer = 1.25
-
-		1:
-			decision_timer = 0.72
-
-		2:
-			decision_timer = 0.34
-
-	move_target = Vector2(
-		rng.randf_range(90.0, 1190.0),
-		rng.randf_range(70.0, 225.0)
-	)
-
-
-func _next_skill_delay() -> float:
-	match difficulty:
-		0:
-			return rng.randf_range(5.8, 7.2)
-
-		1:
-			return rng.randf_range(4.0, 5.2)
-
-		2:
-			return rng.randf_range(2.9, 4.0)
-
-	return 5.0
 
 
 func _get_player() -> Node2D:
@@ -198,14 +462,58 @@ func _get_player() -> Node2D:
 	return players[0] as Node2D
 
 
-func _aim_at_player() -> Vector2:
-	var target := _get_player()
+func _get_heal_pack() -> Node2D:
+	var packs := get_tree().get_nodes_in_group("heal_pack")
 
-	if target == null:
+	if packs.is_empty():
+		return null
+
+	return packs[0] as Node2D
+
+
+func _get_nearest_incoming_projectile() -> Node:
+	var nearest: Node = null
+	var nearest_distance: float = INF
+
+	for node in get_tree().get_nodes_in_group("projectile"):
+		if not is_instance_valid(node):
+			continue
+
+		if not "target_group" in node:
+			continue
+
+		if node.target_group != &"enemy":
+			continue
+
+		var distance: float = global_position.distance_to(
+			node.global_position
+		)
+
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest = node
+
+	return nearest
+
+
+func _predicted_aim_position(player: Node2D) -> Vector2:
+	var target_position: Vector2 = player.global_position
+
+	if difficulty >= 1 and "velocity" in player:
+		target_position += player.velocity * prediction_time
+
+	return target_position
+
+
+func _aim_at_player() -> Vector2:
+	var player := _get_player()
+
+	if player == null:
 		return Vector2.DOWN
 
+	var target_position := _predicted_aim_position(player)
 	var dir := (
-		target.global_position
+		target_position
 		- global_position
 	).normalized()
 
@@ -218,6 +526,7 @@ func _aim_at_player() -> Vector2:
 
 
 func _spawn(
+	spawn_position: Vector2,
 	direction: Vector2,
 	speed: float,
 	damage: int,
@@ -233,15 +542,47 @@ func _spawn(
 	radius_growth: float = 0.0
 ) -> void:
 	var projectile := PROJECTILE_SCENE.instantiate()
-
 	get_tree().current_scene.add_child(projectile)
 
 	projectile.setup(
-		global_position + direction.normalized() * 34.0,
+		spawn_position,
 		direction,
 		speed,
 		damage,
 		&"player",
+		radius,
+		color,
+		style,
+		trajectory,
+		max_distance,
+		pierce,
+		wave_amplitude,
+		wave_frequency,
+		acceleration,
+		radius_growth
+	)
+
+
+func _spawn_from_self(
+	direction: Vector2,
+	speed: float,
+	damage: int,
+	radius: float,
+	color: Color,
+	style: int,
+	trajectory: int = 0,
+	max_distance: float = 1400.0,
+	pierce: int = 0,
+	wave_amplitude: float = 0.0,
+	wave_frequency: float = 0.0,
+	acceleration: float = 0.0,
+	radius_growth: float = 0.0
+) -> void:
+	_spawn(
+		global_position + direction.normalized() * 34.0,
+		direction,
+		speed,
+		damage,
 		radius,
 		color,
 		style,
@@ -260,9 +601,9 @@ func _shoot_basic() -> void:
 
 	match character_index:
 		0:
-			_spawn(
+			_spawn_from_self(
 				dir,
-				560.0,
+				570.0,
 				attack_damage,
 				7.0,
 				Color(0.35, 0.85, 1.0),
@@ -272,9 +613,9 @@ func _shoot_basic() -> void:
 			)
 
 		1:
-			_spawn(
+			_spawn_from_self(
 				dir,
-				720.0,
+				770.0,
 				attack_damage,
 				5.0,
 				Color(1.0, 0.82, 0.24),
@@ -284,9 +625,9 @@ func _shoot_basic() -> void:
 			)
 
 		2:
-			_spawn(
+			_spawn_from_self(
 				dir,
-				620.0,
+				650.0,
 				attack_damage,
 				9.0,
 				Color(1.0, 0.35, 0.52),
@@ -296,58 +637,259 @@ func _shoot_basic() -> void:
 			)
 
 
-func _use_character_skill() -> void:
+func _shoot_at_position(
+	target_position: Vector2,
+	heal_pack_shot: bool = false
+) -> void:
+	var dir := (
+		target_position
+		- global_position
+	).normalized()
+
+	var speed: float = (
+		900.0
+		if heal_pack_shot and difficulty == 2
+		else 720.0
+	)
+
+	_spawn_from_self(
+		dir,
+		speed,
+		attack_damage,
+		6.0,
+		Color(0.88, 0.95, 1.0),
+		2 if character_index == 1 else 0,
+		0,
+		1250.0
+	)
+
+
+# =========================================================
+# AI Q / E / SHIFT / R
+# =========================================================
+
+func _use_q_skill(player: Node2D) -> void:
 	var dir := _aim_at_player()
 
 	match character_index:
-		# ARIA AI: 굽는 마력탄
 		0:
-			_spawn(
+			q_cooldown = 3.0
+
+			_spawn_from_self(
 				dir,
-				560.0,
-				attack_damage + 8,
+				1220.0,
+				38 + difficulty * 4,
 				9.0,
-				Color(0.68, 0.42, 1.0),
-				5,
+				Color(0.38, 0.94, 1.0),
 				1,
-				950.0,
-				0,
-				38.0,
-				6.0
+				2,
+				1500.0,
+				1,
+				0.0,
+				0.0,
+				520.0
 			)
 
-			_spawn(
-				dir,
-				560.0,
-				attack_damage + 8,
-				9.0,
-				Color(0.40, 0.88, 1.0),
-				5,
-				1,
-				950.0,
-				0,
-				-38.0,
-				6.0
-			)
-
-		# LYRA AI: 3방향 화살
 		1:
-			for angle in [-0.16, 0.0, 0.16]:
-				_spawn(
+			q_cooldown = 3.2
+
+			_spawn_from_self(
+				dir,
+				1450.0,
+				44 + difficulty * 4,
+				6.0,
+				Color(1.0, 0.68, 0.12),
+				2,
+				2,
+				1800.0,
+				2,
+				0.0,
+				0.0,
+				460.0
+			)
+
+		2:
+			q_cooldown = 2.2
+
+			_spawn_from_self(
+				dir,
+				660.0,
+				34 + difficulty * 4,
+				16.0,
+				Color(1.0, 0.42, 0.58),
+				4,
+				0,
+				680.0
+			)
+
+
+func _use_e_skill(player: Node2D) -> void:
+	var dir := _aim_at_player()
+
+	match character_index:
+		# ARIA: 다중 곡선 파편
+		0:
+			e_cooldown = 5.0
+
+			for i in range(6):
+				var side: float = -1.0 if i % 2 == 0 else 1.0
+				var angle_offset: float = float(i - 2) * 0.055
+
+				_spawn_from_self(
+					dir.rotated(angle_offset),
+					580.0 + float(i) * 22.0,
+					13 + difficulty,
+					7.0,
+					Color(0.60 + float(i) * 0.04, 0.38, 1.0),
+					5,
+					1,
+					940.0,
+					0,
+					side * (25.0 + float(i) * 6.0),
+					5.0 + float(i) * 0.2
+				)
+
+		# LYRA: 5방향 부채꼴
+		1:
+			e_cooldown = 4.7
+
+			for angle in [-0.28, -0.14, 0.0, 0.14, 0.28]:
+				_spawn_from_self(
 					dir.rotated(angle),
-					800.0,
-					attack_damage,
+					920.0,
+					11 + difficulty,
 					5.0,
-					Color(1.0, 0.72, 0.18),
+					Color(0.95, 0.90, 0.32),
 					2,
 					0,
 					1000.0
 				)
 
-		# SERA AI: 투사체 튕겨내기
+		# SERA: 일반 판단에서 쓸 경우에도 Deflect
 		2:
-			deflect_timer = 0.55
+			_use_sera_deflect()
 
+
+func _use_sera_deflect() -> void:
+	e_cooldown = 5.2
+	deflect_timer = (
+		0.42
+		if difficulty == 0
+		else 0.58
+		if difficulty == 1
+		else 0.72
+	)
+
+
+func _use_defensive_shift(incoming: Node) -> void:
+	var projectile_dir: Vector2 = incoming.direction
+	var dodge_dir := Vector2(
+		-projectile_dir.y,
+		projectile_dir.x
+	)
+
+	if rng.randf() < 0.5:
+		dodge_dir = -dodge_dir
+
+	dodge_dir = dodge_dir.normalized()
+
+	match character_index:
+		0:
+			shift_cooldown = 5.0
+			invulnerable_timer = 0.20
+			position += dodge_dir * 165.0
+
+		1:
+			shift_cooldown = 3.8
+			invulnerable_timer = 0.14
+			dash_timer = 0.18
+			position += dodge_dir * 125.0
+
+		2:
+			shift_cooldown = 4.4
+			invulnerable_timer = 0.18
+			dash_timer = 0.16
+			position += dodge_dir * 190.0
+
+	position.x = clampf(position.x, MIN_X, MAX_X)
+	position.y = clampf(position.y, MIN_Y, MAX_Y)
+	move_target = position
+
+
+func _use_r_skill(player: Node2D) -> void:
+	var dir := _aim_at_player()
+	ultimate_used.emit(character_index)
+
+	match character_index:
+		0:
+			r_cooldown = 9.5
+
+			_spawn_from_self(
+				dir,
+				480.0,
+				72 + difficulty * 5,
+				19.0,
+				Color(0.72, 0.28, 1.0),
+				3,
+				0,
+				1350.0,
+				2,
+				0.0,
+				0.0,
+				0.0,
+				6.0
+			)
+
+		1:
+			r_cooldown = 10.0
+
+			var target_x: float = clampf(
+				_predicted_aim_position(player).x,
+				120.0,
+				1160.0
+			)
+
+			for i in range(9):
+				var offset: float = float(i - 4) * 38.0
+				var spawn := Vector2(
+					target_x + offset,
+					745.0 + absf(float(i - 4)) * 12.0
+				)
+
+				_spawn(
+					spawn,
+					Vector2.UP,
+					790.0 + float(i % 3) * 70.0,
+					16 + difficulty,
+					6.0,
+					Color(1.0, 0.58, 0.08),
+					6,
+					2,
+					430.0,
+					0,
+					0.0,
+					0.0,
+					160.0
+				)
+
+		2:
+			r_cooldown = 8.4
+
+			for angle in [-0.18, -0.12, -0.06, 0.0, 0.06, 0.12, 0.18]:
+				_spawn_from_self(
+					dir.rotated(angle),
+					790.0,
+					20 + difficulty * 2,
+					17.0,
+					Color(1.0, 0.16, 0.36),
+					7,
+					2,
+					1050.0,
+					0,
+					0.0,
+					0.0,
+					260.0
+				)
 
 
 func _process_deflect() -> void:
@@ -358,21 +900,25 @@ func _process_deflect() -> void:
 		if not node.has_method("reflect_projectile"):
 			continue
 
-		# CPU를 노리는 플레이어 투사체만 튕겨낸다.
 		if node.target_group != &"enemy":
 			continue
 
-		if global_position.distance_to(node.global_position) <= 100.0:
+		if global_position.distance_to(node.global_position) <= 104.0:
 			node.reflect_projectile(
 				&"player",
 				1.15
 			)
 
+
 func take_damage(amount: int) -> void:
 	if not active:
 		return
 
+	if invulnerable_timer > 0.0:
+		return
+
 	hp = maxi(0, hp - amount)
+	hit_flash_timer = 0.12
 	queue_redraw()
 
 	if hp <= 0:
@@ -380,10 +926,10 @@ func take_damage(amount: int) -> void:
 		defeated.emit()
 
 
-
 func heal(amount: int) -> void:
 	hp = mini(MAX_HP, hp + amount)
 	queue_redraw()
+
 
 func get_hp_ratio() -> float:
 	return float(hp) / float(MAX_HP)
@@ -413,6 +959,12 @@ func _draw() -> void:
 
 		2:
 			_draw_sera()
+
+	if hit_flash_timer > 0.0:
+		draw_rect(
+			Rect2(Vector2(-28.0, -39.0), Vector2(56.0, 82.0)),
+			Color(1.0, 0.86, 0.86, 0.32)
+		)
 
 
 func _draw_aria() -> void:

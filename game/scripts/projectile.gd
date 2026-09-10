@@ -1,5 +1,7 @@
 extends Area2D
 
+const HIT_EFFECT_SCENE: PackedScene = preload("res://scenes/HitEffect.tscn")
+
 # trajectory
 const TRAJECTORY_STRAIGHT: int = 0
 const TRAJECTORY_SINE: int = 1
@@ -174,11 +176,31 @@ func _on_body_entered(body: Node) -> void:
 	if body.is_in_group(target_group) and body.has_method("take_damage"):
 		already_hit.append(body)
 		body.take_damage(damage)
+		_spawn_hit_effect()
+
+		var scene := get_tree().current_scene
+		if scene != null and scene.has_method("request_impact"):
+			scene.request_impact(
+				damage,
+				global_position,
+				projectile_color
+			)
 
 		if pierce_left > 0:
 			pierce_left -= 1
 		else:
 			queue_free()
+
+
+func _spawn_hit_effect() -> void:
+	var effect := HIT_EFFECT_SCENE.instantiate()
+	get_tree().current_scene.add_child(effect)
+
+	effect.setup(
+		global_position,
+		damage,
+		projectile_color
+	)
 
 
 func _draw() -> void:

@@ -42,6 +42,11 @@ var heal_pack_direction: float = 1.0
 var heal_message_timer: float = 0.0
 var heal_message: String = ""
 
+var impact_shake_timer: float = 0.0
+var impact_shake_strength: float = 0.0
+var impact_flash_timer: float = 0.0
+var impact_flash_color: Color = Color.WHITE
+
 var player_terrain_status: String = ""
 var enemy_terrain_status: String = ""
 
@@ -49,6 +54,7 @@ var rng := RandomNumberGenerator.new()
 
 @onready var player = $Player
 @onready var enemy = $Enemy
+@onready var camera: Camera2D = $Camera2D
 
 
 # Main menu
@@ -131,6 +137,31 @@ func _process(delta: float) -> void:
 		0.0,
 		heal_message_timer - delta
 	)
+
+
+	impact_shake_timer = maxf(
+		0.0,
+		impact_shake_timer - delta
+	)
+
+	impact_flash_timer = maxf(
+		0.0,
+		impact_flash_timer - delta
+	)
+
+	if impact_shake_timer > 0.0:
+		camera.offset = Vector2(
+			rng.randf_range(
+				-impact_shake_strength,
+				impact_shake_strength
+			),
+			rng.randf_range(
+				-impact_shake_strength,
+				impact_shake_strength
+			)
+		)
+	else:
+		camera.offset = Vector2.ZERO
 
 	if state == GameState.BATTLE:
 		_update_map_effects(delta)
@@ -246,7 +277,8 @@ func _start_battle() -> void:
 	player.configure_character(selected_character)
 	enemy.configure(
 		selected_difficulty,
-		enemy_character
+		enemy_character,
+		selected_map
 	)
 
 	player.reset_for_battle()
@@ -478,6 +510,74 @@ func _on_heal_pack_claimed(
 
 	queue_redraw()
 
+
+# =========================================================
+# IMPACT FEEDBACK
+# =========================================================
+
+func request_impact(
+	damage: int,
+	_hit_position: Vector2,
+	color: Color
+) -> void:
+	var strength: float = clampf(
+		float(damage) * 0.095,
+		2.0,
+		10.0
+	)
+
+	impact_shake_strength = maxf(
+		impact_shake_strength,
+		strength
+	)
+
+	impact_shake_timer = maxf(
+		impact_shake_timer,
+		0.08 if damage < 45 else 0.14
+	)
+
+	impact_flash_timer = maxf(
+		impact_flash_timer,
+		0.035 if damage < 45 else 0.075
+	)
+
+	impact_flash_color = color.lightened(0.40)
+
+
+func _draw_impact_flash() -> void:
+	var alpha: float = clampf(
+		impact_flash_timer / 0.075,
+		0.0,
+		1.0
+	) * 0.12
+
+	draw_rect(
+		Rect2(Vector2.ZERO, SCREEN_SIZE),
+		Color(
+			impact_flash_color.r,
+			impact_flash_color.g,
+			impact_flash_color.b,
+			alpha
+		)
+	)
+
+
+# =========================================================
+# AI TERRAIN AWARENESS
+# Medium/Hard AI가 비맵의 물웅덩이를 이동 목표로 덜 선택한다.
+# 설원 빙판은 위험지형이 아니라 활용 가능한 지형으로 취급한다.
+# =========================================================
+
+func is_ai_position_bad(point: Vector2) -> bool:
+	if selected_map != MAP_RAIN_RUINS:
+		return false
+
+	for puddle in rain_puddles:
+		if puddle.has_point(point):
+			return true
+
+	return false
+
 func _load_stats() -> void:
 	var config := ConfigFile.new()
 	var err := config.load(STATS_PATH)
@@ -544,6 +644,10 @@ func _draw() -> void:
 		and ultimate_banner_timer > 0.0
 	):
 		_draw_ultimate_banner(font)
+
+
+	if impact_flash_timer > 0.0:
+		_draw_impact_flash()
 
 
 # =========================================================
