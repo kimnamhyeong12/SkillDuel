@@ -20,6 +20,7 @@ var character_name: String = "ARIA"
 
 var move_speed: float = 300.0
 var terrain_speed_multiplier: float = 1.0
+var terrain_is_ice: bool = false
 var move_direction: Vector2 = Vector2.ZERO
 
 var basic_cooldown: float = 0.0
@@ -31,6 +32,7 @@ var r_cooldown: float = 0.0
 var cast_timer: float = 0.0
 var dash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
+var deflect_timer: float = 0.0
 
 
 func _ready() -> void:
@@ -70,8 +72,13 @@ func set_terrain_speed_multiplier(value: float) -> void:
 	terrain_speed_multiplier = clampf(value, 0.35, 1.50)
 
 
+func set_terrain_ice(value: bool) -> void:
+	terrain_is_ice = value
+
+
 func reset_terrain_effects() -> void:
 	terrain_speed_multiplier = 1.0
+	terrain_is_ice = false
 
 
 func reset_for_battle() -> void:
@@ -82,7 +89,9 @@ func reset_for_battle() -> void:
 	cast_timer = 0.0
 	dash_timer = 0.0
 	invulnerable_timer = 0.0
+	deflect_timer = 0.0
 	terrain_speed_multiplier = 1.0
+	terrain_is_ice = false
 
 	_reset_cooldowns()
 	queue_redraw()
@@ -105,6 +114,10 @@ func _physics_process(delta: float) -> void:
 	cast_timer = maxf(0.0, cast_timer - delta)
 	dash_timer = maxf(0.0, dash_timer - delta)
 	invulnerable_timer = maxf(0.0, invulnerable_timer - delta)
+	deflect_timer = maxf(0.0, deflect_timer - delta)
+
+	if deflect_timer > 0.0:
+		_process_deflect()
 
 	_update_movement()
 
@@ -162,7 +175,18 @@ func _update_movement() -> void:
 	if move_direction.length() > 0.0:
 		move_direction = move_direction.normalized()
 
-	velocity = move_direction * move_speed * terrain_speed_multiplier
+	var target_velocity := (
+		move_direction
+		* move_speed
+		* terrain_speed_multiplier
+	)
+
+	if terrain_is_ice:
+		# 빙판에서는 더 잘 미끄러지고 급정지가 어렵다.
+		target_velocity *= 1.18
+		velocity = velocity.lerp(target_velocity, 0.075)
+	else:
+		velocity = target_velocity
 
 	if dash_timer > 0.0:
 		velocity *= 1.25
@@ -448,37 +472,12 @@ func _use_e_skill() -> void:
 					980.0
 				)
 
-		# SERA E: X자 형태의 두 검기
+		# SERA E: Deflect
+		# 0.65초 동안 주변 적 투사체를 되받아친다.
+		# 반사된 투사체는 적을 노리고 피해량이 20% 증가한다.
 		2:
-			e_cooldown = 3.6
-
-			_spawn_from_self(
-				aim.rotated(-0.12),
-				820.0,
-				24,
-				12.0,
-				Color(1.0, 0.22, 0.42),
-				4,
-				1,
-				850.0,
-				0,
-				26.0,
-				8.0
-			)
-
-			_spawn_from_self(
-				aim.rotated(0.12),
-				820.0,
-				24,
-				12.0,
-				Color(1.0, 0.55, 0.68),
-				4,
-				1,
-				850.0,
-				0,
-				-26.0,
-				8.0
-			)
+			e_cooldown = 5.2
+			deflect_timer = 0.65
 
 
 # =========================================================
@@ -641,6 +640,25 @@ func _use_r_skill() -> void:
 				)
 
 
+
+func _process_deflect() -> void:
+	for node in get_tree().get_nodes_in_group("projectile"):
+		if not is_instance_valid(node):
+			continue
+
+		if not node.has_method("reflect_projectile"):
+			continue
+
+		# 플레이어를 노리는 CPU 투사체만 튕겨낸다.
+		if node.target_group != &"player":
+			continue
+
+		if global_position.distance_to(node.global_position) <= 108.0:
+			node.reflect_projectile(
+				&"enemy",
+				1.20
+			)
+
 func take_damage(amount: int) -> void:
 	if not active:
 		return
@@ -656,6 +674,11 @@ func take_damage(amount: int) -> void:
 		defeated.emit()
 
 
+
+func heal(amount: int) -> void:
+	hp = mini(MAX_HP, hp + amount)
+	queue_redraw()
+
 func get_hp_ratio() -> float:
 	return float(hp) / float(MAX_HP)
 
@@ -666,6 +689,29 @@ func get_hp_ratio() -> float:
 # =========================================================
 
 func _draw() -> void:
+	if deflect_timer > 0.0 and character_index == 2:
+		var shield_alpha: float = 0.55 + sin(Time.get_ticks_msec() * 0.02) * 0.15
+
+		draw_arc(
+			Vector2.ZERO,
+			62.0,
+			0.0,
+			TAU,
+			32,
+			Color(1.0, 0.42, 0.62, shield_alpha),
+			5.0
+		)
+
+		draw_arc(
+			Vector2.ZERO,
+			51.0,
+			0.0,
+			TAU,
+			32,
+			Color(1.0, 0.88, 0.94, shield_alpha * 0.7),
+			2.0
+		)
+
 	if dash_timer > 0.0:
 		draw_rect(
 			Rect2(Vector2(-32.0, -20.0), Vector2(64.0, 58.0)),

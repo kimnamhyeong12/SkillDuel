@@ -1,0 +1,14 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/heal_pack.gd" id="1_heal"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_heal"]
+size = Vector2(44, 38)
+
+[node name="HealPack" type="Area2D"]
+script = ExtResource("1_heal")
+monitoring = true
+monitorable = true
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("RectangleShape2D_heal")

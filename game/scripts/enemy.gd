@@ -20,6 +20,7 @@ var character_name: String = "LYRA"
 
 var move_speed: float = 110.0
 var terrain_speed_multiplier: float = 1.0
+var terrain_is_ice: bool = false
 var attack_interval: float = 1.6
 var attack_damage: int = 11
 var aim_spread: float = 0.10
@@ -28,6 +29,7 @@ var shoot_cooldown: float = 1.0
 var skill_cooldown: float = 4.5
 var move_target: Vector2 = Vector2(980.0, 145.0)
 var decision_timer: float = 0.0
+var deflect_timer: float = 0.0
 
 var rng := RandomNumberGenerator.new()
 
@@ -80,8 +82,13 @@ func set_terrain_speed_multiplier(value: float) -> void:
 	terrain_speed_multiplier = clampf(value, 0.35, 1.50)
 
 
+func set_terrain_ice(value: bool) -> void:
+	terrain_is_ice = value
+
+
 func reset_terrain_effects() -> void:
 	terrain_speed_multiplier = 1.0
+	terrain_is_ice = false
 
 
 func reset_for_battle() -> void:
@@ -95,6 +102,8 @@ func reset_for_battle() -> void:
 	decision_timer = 0.0
 	move_target = Vector2(920.0, 145.0)
 	terrain_speed_multiplier = 1.0
+	terrain_is_ice = false
+	deflect_timer = 0.0
 
 	queue_redraw()
 
@@ -103,6 +112,11 @@ func _physics_process(delta: float) -> void:
 	if not active:
 		return
 
+	deflect_timer = maxf(0.0, deflect_timer - delta)
+
+	if deflect_timer > 0.0:
+		_process_deflect()
+
 	decision_timer -= delta
 
 	if decision_timer <= 0.0:
@@ -110,10 +124,20 @@ func _physics_process(delta: float) -> void:
 
 	var to_target := move_target - position
 
+	var target_velocity := Vector2.ZERO
+
 	if to_target.length() > 8.0:
-		velocity = to_target.normalized() * move_speed * terrain_speed_multiplier
+		target_velocity = (
+			to_target.normalized()
+			* move_speed
+			* terrain_speed_multiplier
+		)
+
+	if terrain_is_ice:
+		target_velocity *= 1.18
+		velocity = velocity.lerp(target_velocity, 0.085)
 	else:
-		velocity = Vector2.ZERO
+		velocity = target_velocity
 
 	move_and_slide()
 
@@ -320,36 +344,29 @@ func _use_character_skill() -> void:
 					1000.0
 				)
 
-		# SERA AI: X 형태 검기
+		# SERA AI: 투사체 튕겨내기
 		2:
-			_spawn(
-				dir.rotated(-0.10),
-				720.0,
-				attack_damage + 5,
-				11.0,
-				Color(1.0, 0.22, 0.42),
-				4,
-				1,
-				800.0,
-				0,
-				24.0,
-				7.0
-			)
+			deflect_timer = 0.55
 
-			_spawn(
-				dir.rotated(0.10),
-				720.0,
-				attack_damage + 5,
-				11.0,
-				Color(1.0, 0.55, 0.68),
-				4,
-				1,
-				800.0,
-				0,
-				-24.0,
-				7.0
-			)
 
+
+func _process_deflect() -> void:
+	for node in get_tree().get_nodes_in_group("projectile"):
+		if not is_instance_valid(node):
+			continue
+
+		if not node.has_method("reflect_projectile"):
+			continue
+
+		# CPU를 노리는 플레이어 투사체만 튕겨낸다.
+		if node.target_group != &"enemy":
+			continue
+
+		if global_position.distance_to(node.global_position) <= 100.0:
+			node.reflect_projectile(
+				&"player",
+				1.15
+			)
 
 func take_damage(amount: int) -> void:
 	if not active:
@@ -363,11 +380,29 @@ func take_damage(amount: int) -> void:
 		defeated.emit()
 
 
+
+func heal(amount: int) -> void:
+	hp = mini(MAX_HP, hp + amount)
+	queue_redraw()
+
 func get_hp_ratio() -> float:
 	return float(hp) / float(MAX_HP)
 
 
 func _draw() -> void:
+	if deflect_timer > 0.0 and character_index == 2:
+		var shield_alpha: float = 0.48 + sin(Time.get_ticks_msec() * 0.02) * 0.14
+
+		draw_arc(
+			Vector2.ZERO,
+			58.0,
+			0.0,
+			TAU,
+			32,
+			Color(1.0, 0.42, 0.62, shield_alpha),
+			4.0
+		)
+
 	# CPU도 플레이어와 같은 픽셀 캐릭터 계열로 표현
 	match character_index:
 		0:

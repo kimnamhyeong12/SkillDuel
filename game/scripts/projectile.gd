@@ -145,6 +145,28 @@ func _update_collision_radius() -> void:
 		circle.radius = current_radius
 
 
+
+func reflect_projectile(
+	new_target_group: StringName,
+	damage_multiplier: float = 1.20
+) -> void:
+	# SERA의 튕겨내기로 소유권과 진행 방향을 뒤집는다.
+	target_group = new_target_group
+	direction = -direction
+	start_position = global_position
+	travelled = 0.0
+	returning = false
+	already_hit.clear()
+
+	damage = maxi(
+		1,
+		int(round(float(damage) * damage_multiplier))
+	)
+
+	projectile_color = projectile_color.lightened(0.22)
+	rotation = direction.angle()
+	queue_redraw()
+
 func _on_body_entered(body: Node) -> void:
 	if body in already_hit:
 		return

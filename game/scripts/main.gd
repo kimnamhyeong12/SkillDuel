@@ -13,10 +13,11 @@ const SCREEN_SIZE: Vector2 = Vector2(1280.0, 720.0)
 const RIVER_TOP: float = 280.0
 const RIVER_BOTTOM: float = 440.0
 const STATS_PATH: String = "user://skillduel_stats.cfg"
+const HEAL_PACK_SCENE: PackedScene = preload("res://scenes/HealPack.tscn")
 
 const MAP_ARCANE_RIVER: int = 0
 const MAP_RAIN_RUINS: int = 1
-const MAP_SCORCHED_GORGE: int = 2
+const MAP_FROZEN_PASS: int = 2
 
 var state: GameState = GameState.MAIN_MENU
 
@@ -36,8 +37,10 @@ var ultimate_banner_timer: float = 0.0
 var ultimate_banner_character: int = 0
 var ultimate_banner_enemy: bool = false
 
-var player_heat_tick: float = 0.0
-var enemy_heat_tick: float = 0.0
+var heal_pack_timer: float = 10.0
+var heal_pack_direction: float = 1.0
+var heal_message_timer: float = 0.0
+var heal_message: String = ""
 
 var player_terrain_status: String = ""
 var enemy_terrain_status: String = ""
@@ -90,14 +93,14 @@ var rain_puddles: Array[Rect2] = [
 	Rect2(970.0, 500.0, 185.0, 95.0)
 ]
 
-# Heat vents: top field + bottom field
-var heat_zones: Array[Rect2] = [
-	Rect2(170.0, 120.0, 150.0, 72.0),
-	Rect2(605.0, 75.0, 150.0, 86.0),
-	Rect2(985.0, 160.0, 140.0, 72.0),
-	Rect2(120.0, 560.0, 150.0, 82.0),
-	Rect2(540.0, 500.0, 170.0, 92.0),
-	Rect2(985.0, 575.0, 155.0, 80.0)
+# Ice patches: top field + bottom field
+var ice_zones: Array[Rect2] = [
+	Rect2(150.0, 105.0, 190.0, 74.0),
+	Rect2(555.0, 165.0, 220.0, 76.0),
+	Rect2(960.0, 78.0, 175.0, 90.0),
+	Rect2(155.0, 530.0, 205.0, 82.0),
+	Rect2(600.0, 575.0, 220.0, 82.0),
+	Rect2(980.0, 505.0, 175.0, 92.0)
 ]
 
 
@@ -124,8 +127,14 @@ func _process(delta: float) -> void:
 		ultimate_banner_timer - delta
 	)
 
+	heal_message_timer = maxf(
+		0.0,
+		heal_message_timer - delta
+	)
+
 	if state == GameState.BATTLE:
 		_update_map_effects(delta)
+		_update_heal_pack(delta)
 	else:
 		_clear_terrain_effects()
 
@@ -249,8 +258,12 @@ func _start_battle() -> void:
 	player.set_active(true)
 	enemy.set_active(true)
 
-	player_heat_tick = 0.0
-	enemy_heat_tick = 0.0
+	heal_pack_timer = 10.0
+	heal_pack_direction = 1.0
+	heal_message_timer = 0.0
+	heal_message = ""
+
+	_clear_heal_packs()
 
 	state = GameState.BATTLE
 	queue_redraw()
@@ -258,6 +271,8 @@ func _start_battle() -> void:
 
 func _end_battle(player_won: bool) -> void:
 	result_was_win = player_won
+
+	_clear_heal_packs()
 
 	player.set_active(false)
 	enemy.set_active(false)
@@ -311,6 +326,7 @@ func _go_to_difficulty_select() -> void:
 
 func _hide_battle_objects() -> void:
 	_clear_projectiles()
+	_clear_heal_packs()
 	_clear_terrain_effects()
 
 	player.set_active(false)
@@ -337,11 +353,17 @@ func _clear_terrain_effects() -> void:
 		enemy.reset_terrain_effects()
 
 
+func _clear_heal_packs() -> void:
+	for node in get_tree().get_nodes_in_group("heal_pack"):
+		if is_instance_valid(node):
+			node.queue_free()
+
+
 # =========================================================
 # MAP EFFECTS
 # =========================================================
 
-func _update_map_effects(delta: float) -> void:
+func _update_map_effects(_delta: float) -> void:
 	player.reset_terrain_effects()
 	enemy.reset_terrain_effects()
 
@@ -350,18 +372,13 @@ func _update_map_effects(delta: float) -> void:
 
 	match selected_map:
 		MAP_ARCANE_RIVER:
-			# Neutral map
-			player_heat_tick = 0.0
-			enemy_heat_tick = 0.0
+			pass
 
 		MAP_RAIN_RUINS:
 			_apply_rain_puddles()
 
-			player_heat_tick = 0.0
-			enemy_heat_tick = 0.0
-
-		MAP_SCORCHED_GORGE:
-			_apply_heat_zones(delta)
+		MAP_FROZEN_PASS:
+			_apply_ice_zones()
 
 
 func _apply_rain_puddles() -> void:
@@ -384,37 +401,82 @@ func _apply_rain_puddles() -> void:
 		enemy_terrain_status = "PUDDLE"
 
 
-func _apply_heat_zones(delta: float) -> void:
-	var player_hot: bool = false
-	var enemy_hot: bool = false
+func _apply_ice_zones() -> void:
+	var player_ice: bool = false
+	var enemy_ice: bool = false
 
-	for zone in heat_zones:
+	for zone in ice_zones:
 		if zone.has_point(player.position):
-			player_hot = true
+			player_ice = true
 
 		if zone.has_point(enemy.position):
-			enemy_hot = true
+			enemy_ice = true
 
-	if player_hot:
-		player_heat_tick += delta
-		player_terrain_status = "HEAT  지속 피해"
+	if player_ice:
+		player.set_terrain_ice(true)
+		player_terrain_status = "ICE  미끄러짐"
 
-		if player_heat_tick >= 0.50:
-			player_heat_tick = 0.0
-			player.take_damage(4)
+	if enemy_ice:
+		enemy.set_terrain_ice(true)
+		enemy_terrain_status = "ICE"
+
+
+# =========================================================
+# HEAL PACK
+# 중앙 강을 약 10초마다 가로지르는 중립 오브젝트.
+# 먼저 공격해 맞힌 쪽이 35 HP 회복.
+# =========================================================
+
+func _update_heal_pack(delta: float) -> void:
+	heal_pack_timer -= delta
+
+	if heal_pack_timer > 0.0:
+		return
+
+	heal_pack_timer = 10.0
+	_spawn_heal_pack()
+
+
+func _spawn_heal_pack() -> void:
+	var pack := HEAL_PACK_SCENE.instantiate()
+	add_child(pack)
+
+	var y: float = rng.randf_range(
+		RIVER_TOP + 38.0,
+		RIVER_BOTTOM - 38.0
+	)
+
+	var start_x: float
+
+	if heal_pack_direction > 0.0:
+		start_x = -55.0
 	else:
-		player_heat_tick = 0.0
+		start_x = 1335.0
 
-	if enemy_hot:
-		enemy_heat_tick += delta
-		enemy_terrain_status = "HEAT"
+	pack.setup(
+		Vector2(start_x, y),
+		heal_pack_direction
+	)
 
-		if enemy_heat_tick >= 0.50:
-			enemy_heat_tick = 0.0
-			enemy.take_damage(4)
+	pack.claimed.connect(
+		_on_heal_pack_claimed
+	)
+
+	heal_pack_direction *= -1.0
+
+
+func _on_heal_pack_claimed(
+	by_player: bool,
+	amount: int
+) -> void:
+	heal_message_timer = 1.15
+
+	if by_player:
+		heal_message = "HEAL PACK  +" + str(amount) + " HP"
 	else:
-		enemy_heat_tick = 0.0
+		heal_message = "CPU HEAL  +" + str(amount) + " HP"
 
+	queue_redraw()
 
 func _load_stats() -> void:
 	var config := ConfigFile.new()
@@ -761,7 +823,7 @@ func _draw_character_card(
 	var playstyles: Array[String] = [
 		"곡선 탄도 / 관통 / 광역 궁극기",
 		"고속 사격 / 부채꼴 / 화살비",
-		"짧은 사거리 / 기동 / 연속 검기"
+		"근중거리 / 튕겨내기 / 돌진 검기"
 	]
 
 	var colors: Array[Color] = [
@@ -952,25 +1014,25 @@ func _draw_map_card(
 	var names: Array[String] = [
 		"ARCANE RIVER",
 		"RAIN RUINS",
-		"SCORCHED GORGE"
+		"FROZEN PASS"
 	]
 
 	var korean_names: Array[String] = [
 		"아케인 강가",
 		"비 내리는 폐허",
-		"작열 협곡"
+		"설원 협곡"
 	]
 
 	var effects: Array[String] = [
 		"기본 맵\n특수 지형 없음",
 		"물웅덩이\n진입 시 이동속도 45% 감소",
-		"열기 지대\n진입 시 0.5초마다 4 피해"
+		"빙판 지대\n진입 시 가속 + 미끄러짐"
 	]
 
 	var colors: Array[Color] = [
 		Color(0.10, 0.44, 0.58),
 		Color(0.18, 0.42, 0.58),
-		Color(0.66, 0.24, 0.10)
+		Color(0.30, 0.54, 0.72)
 	]
 
 	var selected: bool = (
@@ -1121,10 +1183,10 @@ func _draw_map_preview(
 				Color(0.15, 0.46, 0.60, 0.75)
 			)
 
-		MAP_SCORCHED_GORGE:
+		MAP_FROZEN_PASS:
 			draw_rect(
 				rect,
-				Color(0.25, 0.10, 0.07)
+				Color(0.70, 0.82, 0.88)
 			)
 
 			draw_rect(
@@ -1138,17 +1200,27 @@ func _draw_map_preview(
 						rect.size.y * 0.22
 					)
 				),
-				Color(0.42, 0.10, 0.04)
+				Color(0.34, 0.63, 0.78)
 			)
 
 			for i in range(5):
-				var x: float = rect.position.x + 35.0 + float(i) * 55.0
+				var x: float = rect.position.x + 25.0 + float(i) * 58.0
+
 				draw_rect(
 					Rect2(
-						Vector2(x, rect.position.y + 82.0),
-						Vector2(30.0, 28.0)
+						Vector2(x, rect.position.y + 90.0),
+						Vector2(42.0, 18.0)
 					),
-					Color(0.90, 0.30, 0.06, 0.55)
+					Color(0.62, 0.86, 0.96, 0.80)
+				)
+
+			for i in range(12):
+				var sx: float = rect.position.x + float((i * 29) % int(rect.size.x))
+				var sy: float = rect.position.y + float((i * 41) % int(rect.size.y))
+
+				draw_rect(
+					Rect2(Vector2(sx, sy), Vector2(3.0, 3.0)),
+					Color.WHITE
 				)
 
 
@@ -1164,8 +1236,8 @@ func _draw_battle_map() -> void:
 		MAP_RAIN_RUINS:
 			_draw_rain_ruins_battle()
 
-		MAP_SCORCHED_GORGE:
-			_draw_scorched_gorge_battle()
+		MAP_FROZEN_PASS:
+			_draw_frozen_pass_battle()
 
 
 func _draw_arcane_river_battle() -> void:
@@ -1267,73 +1339,86 @@ func _draw_rain_ruins_battle() -> void:
 		)
 
 
-func _draw_scorched_gorge_battle() -> void:
+func _draw_frozen_pass_battle() -> void:
+	# snow fields
 	draw_rect(
 		Rect2(Vector2(0.0, 0.0), Vector2(1280.0, RIVER_TOP)),
-		Color(0.24, 0.11, 0.07)
+		Color(0.70, 0.78, 0.82)
 	)
 
 	draw_rect(
 		Rect2(Vector2(0.0, RIVER_BOTTOM), Vector2(1280.0, 280.0)),
-		Color(0.27, 0.12, 0.07)
+		Color(0.74, 0.82, 0.86)
 	)
 
+	# cold river / partially frozen water
 	_draw_common_river(
-		Color(0.30, 0.10, 0.055),
-		Color(0.85, 0.28, 0.08, 0.25)
+		Color(0.18, 0.48, 0.66),
+		Color(0.62, 0.86, 0.96, 0.34)
 	)
 
-	# cracked ground
-	for i in range(40):
-		var x: float = float((i * 103 + 44) % 1280)
-		var y1: float = float(70 + ((i * 61) % 160))
-		var y2: float = float(500 + ((i * 71) % 160))
-
-		draw_line(
-			Vector2(x, y1),
-			Vector2(x + 18.0, y1 + 11.0),
-			Color(0.44, 0.22, 0.12, 0.62),
-			2.0
-		)
-
-		draw_line(
-			Vector2(1280.0 - x, y2),
-			Vector2(1260.0 - x, y2 + 10.0),
-			Color(0.48, 0.23, 0.12, 0.62),
-			2.0
-		)
-
-	# heat zones
-	for zone in heat_zones:
-		var pulse: float = 0.42 + sin(elapsed * 6.0 + zone.position.x * 0.01) * 0.09
+	# darker snow/rock specks
+	for i in range(42):
+		var x: float = float((i * 97 + 21) % 1280)
+		var upper_y: float = float(70 + ((i * 47) % 165))
+		var lower_y: float = float(490 + ((i * 61) % 185))
 
 		draw_rect(
+			Rect2(Vector2(x, upper_y), Vector2(7.0, 4.0)),
+			Color(0.50, 0.62, 0.68, 0.40)
+		)
+
+		draw_rect(
+			Rect2(Vector2(1280.0 - x, lower_y), Vector2(8.0, 4.0)),
+			Color(0.50, 0.62, 0.68, 0.38)
+		)
+
+	# visible ice patches
+	for zone in ice_zones:
+		draw_rect(
 			zone,
-			Color(0.95, 0.25, 0.04, pulse)
+			Color(0.44, 0.78, 0.92, 0.58)
 		)
 
 		draw_rect(
 			Rect2(
-				zone.position + Vector2(10.0, 10.0),
-				zone.size - Vector2(20.0, 20.0)
+				zone.position + Vector2(8.0, 8.0),
+				zone.size - Vector2(16.0, 16.0)
 			),
-			Color(1.0, 0.55, 0.06, pulse * 0.38),
+			Color(0.80, 0.95, 1.0, 0.45),
 			false,
 			3.0
 		)
 
-		# simple heat shimmer bars
 		for row in range(3):
-			var y: float = zone.position.y + 16.0 + float(row) * 18.0
-			var shift: float = sin(elapsed * 7.0 + float(row)) * 10.0
+			var y: float = zone.position.y + 14.0 + float(row) * 18.0
 
 			draw_line(
-				Vector2(zone.position.x + 14.0 + shift, y),
-				Vector2(zone.end.x - 14.0 + shift, y),
-				Color(1.0, 0.78, 0.28, 0.30),
+				Vector2(zone.position.x + 12.0, y),
+				Vector2(zone.end.x - 12.0, y - 7.0),
+				Color(0.88, 0.98, 1.0, 0.38),
 				2.0
 			)
 
+	# snow
+	var snow_fall: float = fmod(elapsed * 78.0, 720.0)
+
+	for i in range(90):
+		var x: float = float((i * 73 + 31) % 1280)
+		var y: float = fmod(
+			float((i * 101) % 720) + snow_fall,
+			720.0
+		)
+
+		var size: float = 2.0 + float(i % 3)
+
+		draw_rect(
+			Rect2(
+				Vector2(x, y),
+				Vector2(size, size)
+			),
+			Color(1.0, 1.0, 1.0, 0.62)
+		)
 
 func _draw_common_river(
 	river_color: Color,
@@ -1447,7 +1532,7 @@ func _draw_battle_hud(font: Font) -> void:
 	var map_names: Array[String] = [
 		"ARCANE RIVER",
 		"RAIN RUINS",
-		"SCORCHED GORGE"
+		"FROZEN PASS"
 	]
 
 	draw_string(
@@ -1461,6 +1546,29 @@ func _draw_battle_hud(font: Font) -> void:
 		15,
 		Color(0.80, 0.88, 0.96)
 	)
+
+
+	# 중앙 강의 중립 힐팩 리스폰 정보
+	draw_string(
+		font,
+		Vector2(0.0, 69.0),
+		"HEAL PACK  %.1fs" % heal_pack_timer,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		1280.0,
+		12,
+		Color(0.55, 1.0, 0.72)
+	)
+
+	if heal_message_timer > 0.0:
+		draw_string(
+			font,
+			Vector2(0.0, 126.0),
+			heal_message,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			1280.0,
+			20,
+			Color(0.55, 1.0, 0.70)
+		)
 
 	if player_terrain_status != "":
 		draw_string(
@@ -1696,8 +1804,29 @@ func _draw_skill_glyph(
 					draw_line(center + Vector2(-size, size * 0.7), center + Vector2(size, -size * 0.7), Color(1.0, 0.35, 0.52), 5.0)
 
 				1:
-					draw_line(center + Vector2(-size, -size), center + Vector2(size, size), Color(1.0, 0.24, 0.42), 4.0)
-					draw_line(center + Vector2(-size, size), center + Vector2(size, -size), Color(1.0, 0.55, 0.68), 4.0)
+					draw_arc(
+						center,
+						size,
+						0.0,
+						TAU,
+						20,
+						Color(1.0, 0.42, 0.62),
+						4.0
+					)
+
+					draw_line(
+						center + Vector2(-size * 0.55, 0.0),
+						center + Vector2(size * 0.55, 0.0),
+						Color.WHITE,
+						2.0
+					)
+
+					draw_line(
+						center + Vector2(size * 0.55, 0.0),
+						center + Vector2(size * 0.20, -size * 0.28),
+						Color.WHITE,
+						2.0
+					)
 
 				2:
 					var bolt := PackedVector2Array([
@@ -1818,7 +1947,7 @@ func _draw_result_screen(font: Font) -> void:
 	var map_names: Array[String] = [
 		"ARCANE RIVER",
 		"RAIN RUINS",
-		"SCORCHED GORGE"
+		"FROZEN PASS"
 	]
 
 	draw_string(
