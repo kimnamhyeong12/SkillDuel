@@ -38,6 +38,7 @@ var think_timer: float = 0.0
 var move_target: Vector2 = Vector2(980.0, 145.0)
 var deflect_timer: float = 0.0
 var hit_flash_timer: float = 0.0
+var animation_time: float = 0.0
 var dash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
 
@@ -157,6 +158,7 @@ func _update_timers(delta: float) -> void:
 
 	deflect_timer = maxf(0.0, deflect_timer - delta)
 	hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+	animation_time += delta
 	dash_timer = maxf(0.0, dash_timer - delta)
 	invulnerable_timer = maxf(0.0, invulnerable_timer - delta)
 
@@ -322,6 +324,71 @@ func _should_use_ultimate(player: Node2D) -> bool:
 	return false
 
 
+
+func _character_preferred_distance() -> float:
+	match character_index:
+		0:
+			# ARIA: 중장거리 공간 장악
+			return 500.0
+
+		1:
+			# LYRA: 최대한 거리 유지
+			return 650.0
+
+		2:
+			# SERA: 반사/검기를 위해 더 적극적으로 접근
+			return 300.0
+
+	return 450.0
+
+
+func _apply_character_personality(
+	candidate: Vector2,
+	player: Node2D
+) -> Vector2:
+	var result := candidate
+	var dx: float = absf(
+		player.global_position.x
+		- global_position.x
+	)
+	var preferred: float = _character_preferred_distance()
+
+	if character_index == 1 and dx < preferred:
+		# LYRA는 플레이어 반대쪽 끝으로 벌린다.
+		result.x = (
+			100.0
+			if player.global_position.x > global_position.x
+			else 1180.0
+		)
+
+	elif character_index == 2 and dx > preferred:
+		# SERA는 상대 X축 쪽으로 접근.
+		result.x = lerpf(
+			global_position.x,
+			player.global_position.x,
+			0.55
+		)
+
+	elif character_index == 0:
+		# ARIA는 너무 가깝지도 멀지도 않게 중거리 유지.
+		if dx < preferred * 0.65:
+			result.x = (
+				120.0
+				if player.global_position.x > global_position.x
+				else 1160.0
+			)
+		elif dx > preferred * 1.35:
+			result.x = lerpf(
+				global_position.x,
+				player.global_position.x,
+				0.32
+			)
+
+	result.x = clampf(result.x, MIN_X, MAX_X)
+	result.y = clampf(result.y, MIN_Y, MAX_Y)
+	return result
+
+
 func _choose_move_target(
 	player: Node2D,
 	incoming: Node
@@ -354,7 +421,8 @@ func _choose_move_target(
 		candidate.y = clampf(candidate.y, MIN_Y, MAX_Y)
 
 		if not _is_bad_position(candidate):
-			move_target = candidate
+			candidate = _apply_character_personality(candidate, player)
+	move_target = candidate
 			return
 
 	# 체력이 낮으면 상대와 x축 거리를 벌린다.
@@ -949,6 +1017,24 @@ func _draw() -> void:
 			4.0
 		)
 
+
+	var bob: float = sin(animation_time * 4.0) * 1.6
+	var tilt: float = 0.0
+
+	if velocity.length() > 20.0:
+		bob = sin(animation_time * 9.0) * 2.5
+		tilt = clampf(velocity.x / 1800.0, -0.08, 0.08)
+
+	if hp <= 0:
+		tilt = -1.35
+		bob = 10.0
+
+	draw_set_transform(
+		Vector2(0.0, bob),
+		tilt,
+		Vector2.ONE
+	)
+
 	# CPU도 플레이어와 같은 픽셀 캐릭터 계열로 표현
 	match character_index:
 		0:
@@ -959,6 +1045,8 @@ func _draw() -> void:
 
 		2:
 			_draw_sera()
+
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 
 	if hit_flash_timer > 0.0:
 		draw_rect(

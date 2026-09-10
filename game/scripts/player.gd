@@ -34,6 +34,7 @@ var dash_timer: float = 0.0
 var invulnerable_timer: float = 0.0
 var deflect_timer: float = 0.0
 var hit_flash_timer: float = 0.0
+var animation_time: float = 0.0
 
 
 func _ready() -> void:
@@ -118,6 +119,7 @@ func _physics_process(delta: float) -> void:
 	invulnerable_timer = maxf(0.0, invulnerable_timer - delta)
 	deflect_timer = maxf(0.0, deflect_timer - delta)
 	hit_flash_timer = maxf(0.0, hit_flash_timer - delta)
+	animation_time += delta
 
 	if deflect_timer > 0.0:
 		_process_deflect()
@@ -291,6 +293,21 @@ func _spawn_from_self(
 	)
 
 
+
+func _notify_basic_sfx() -> void:
+	var scene := get_tree().current_scene
+
+	if scene != null and scene.has_method("notify_basic_attack"):
+		scene.notify_basic_attack()
+
+
+func _notify_skill_sfx(is_deflect: bool = false) -> void:
+	var scene := get_tree().current_scene
+
+	if scene != null and scene.has_method("notify_skill_cast"):
+		scene.notify_skill_cast(is_deflect)
+
+
 # =========================================================
 # BASIC ATTACK
 # =========================================================
@@ -298,6 +315,8 @@ func _spawn_from_self(
 func _use_basic_attack() -> void:
 	if basic_cooldown > 0.0:
 		return
+
+	_notify_basic_sfx()
 
 	cast_timer = 0.12
 	var aim := _aim_direction()
@@ -356,6 +375,8 @@ func _use_basic_attack() -> void:
 func _use_q_skill() -> void:
 	if q_cooldown > 0.0:
 		return
+
+	_notify_skill_sfx()
 
 	cast_timer = 0.22
 	var aim := _aim_direction()
@@ -424,6 +445,8 @@ func _use_e_skill() -> void:
 	if e_cooldown > 0.0:
 		return
 
+	_notify_skill_sfx(character_index == 2)
+
 	cast_timer = 0.28
 	var aim := _aim_direction()
 
@@ -482,6 +505,8 @@ func _use_e_skill() -> void:
 func _use_shift_skill() -> void:
 	if shift_cooldown > 0.0:
 		return
+
+	_notify_skill_sfx()
 
 	var direction := move_direction
 
@@ -713,6 +738,29 @@ func _draw() -> void:
 			Rect2(Vector2(-32.0, -20.0), Vector2(64.0, 58.0)),
 			Color(1.0, 1.0, 1.0, 0.10)
 		)
+
+
+	var bob: float = sin(animation_time * 4.2) * 1.8
+	var tilt: float = 0.0
+
+	if velocity.length() > 20.0:
+		bob = sin(animation_time * 10.0) * 2.8
+		tilt = clampf(velocity.x / 1800.0, -0.08, 0.08)
+
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+	if cast_timer > 0.0:
+		bob -= 2.5
+
+	if hp <= 0:
+		tilt = 1.35
+		bob = 10.0
+
+	draw_set_transform(
+		Vector2(0.0, bob),
+		tilt,
+		Vector2.ONE
+	)
 
 	match character_index:
 		0:

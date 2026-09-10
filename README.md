@@ -75,3 +75,41 @@
 - 큰 피해일수록 더 강한 흔들림/화면 플래시
 - 피격 위치에 픽셀 파편 + 데미지 숫자 표시
 - Player / CPU 피격 플래시
+
+
+## v0.9 - Polish Update
+
+### Sound
+- UI click
+- basic attack
+- skill cast
+- hit
+- ultimate
+- heal pack
+- heal pack warning
+- deflect
+- 외부 음원 대신 프로젝트에 포함된 간단한 chiptune-style WAV 사용
+
+### Character Animation
+- Idle bob
+- Move bob + slight tilt
+- Cast recoil
+- Hit flash
+- Defeat tilt
+- 현재 코드 기반 픽셀 캐릭터 구조를 유지한 상태에서 동작감 추가
+
+### Ultimate Presentation
+- 기존 ULTIMATE 배너 유지
+- 캐릭터 색상 기반 확장 링과 방사형 레이 추가
+- 큰 타격은 기존 v0.8의 화면 흔들림/플래시와 연동
+
+### Heal Pack
+- 등장 2초 전 `HEAL PACK INCOMING`
+- 경고 SFX 추가
+- 기존 10초 주기 / 먼저 맞힌 진영 +35 HP 유지
+
+### AI Personality
+- ARIA: 중거리 유지 + 공간 장악형
+- LYRA: 최대한 거리 벌리기 + 원거리 압박형
+- SERA: 더 적극적으로 접근 + Deflect 활용형
+- 기존 난이도별 인지/예측/회피/힐팩 판단 로직 유지

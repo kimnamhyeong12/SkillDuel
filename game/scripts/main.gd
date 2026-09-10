@@ -14,6 +14,14 @@ const RIVER_TOP: float = 280.0
 const RIVER_BOTTOM: float = 440.0
 const STATS_PATH: String = "user://skillduel_stats.cfg"
 const HEAL_PACK_SCENE: PackedScene = preload("res://scenes/HealPack.tscn")
+const SFX_UI: AudioStream = preload("res://assets/audio/ui_click.wav")
+const SFX_BASIC: AudioStream = preload("res://assets/audio/basic_shot.wav")
+const SFX_SKILL: AudioStream = preload("res://assets/audio/skill_cast.wav")
+const SFX_HIT: AudioStream = preload("res://assets/audio/hit.wav")
+const SFX_ULT: AudioStream = preload("res://assets/audio/ult.wav")
+const SFX_HEAL: AudioStream = preload("res://assets/audio/heal.wav")
+const SFX_WARNING: AudioStream = preload("res://assets/audio/warning.wav")
+const SFX_DEFLECT: AudioStream = preload("res://assets/audio/deflect.wav")
 
 const MAP_ARCANE_RIVER: int = 0
 const MAP_RAIN_RUINS: int = 1
@@ -46,6 +54,9 @@ var impact_shake_timer: float = 0.0
 var impact_shake_strength: float = 0.0
 var impact_flash_timer: float = 0.0
 var impact_flash_color: Color = Color.WHITE
+var heal_warning_played: bool = false
+var sfx_player: AudioStreamPlayer = null
+var sfx_player_alt: AudioStreamPlayer = null
 
 var player_terrain_status: String = ""
 var enemy_terrain_status: String = ""
@@ -114,6 +125,14 @@ func _ready() -> void:
 	rng.randomize()
 	_load_stats()
 
+	sfx_player = AudioStreamPlayer.new()
+	sfx_player.name = "SFXPlayer"
+	add_child(sfx_player)
+
+	sfx_player_alt = AudioStreamPlayer.new()
+	sfx_player_alt.name = "SFXPlayerAlt"
+	add_child(sfx_player_alt)
+
 	# v0.8.1 HOTFIX:
 	# 기존 프로젝트에 Camera2D 노드가 없더라도 자동 생성한다.
 	camera = get_node_or_null("Camera2D") as Camera2D
@@ -178,6 +197,13 @@ func _process(delta: float) -> void:
 	if state == GameState.BATTLE:
 		_update_map_effects(delta)
 		_update_heal_pack(delta)
+
+		if heal_pack_timer <= 2.0 and not heal_warning_played:
+			heal_warning_played = true
+			_play_sfx(SFX_WARNING)
+
+		if heal_pack_timer > 2.0:
+			heal_warning_played = false
 	else:
 		_clear_terrain_effects()
 
@@ -216,6 +242,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	var pos := mouse_event.position
+	_play_sfx(SFX_UI)
 
 	match state:
 		GameState.MAIN_MENU:
@@ -303,6 +330,7 @@ func _start_battle() -> void:
 	enemy.set_active(true)
 
 	heal_pack_timer = 10.0
+	heal_warning_played = false
 	heal_pack_direction = 1.0
 	heal_message_timer = 0.0
 	heal_message = ""
@@ -344,6 +372,7 @@ func _on_enemy_defeated() -> void:
 
 func _on_player_ultimate_used(character_index: int) -> void:
 	ultimate_banner_timer = 0.85
+	_play_sfx(SFX_ULT)
 	ultimate_banner_character = character_index
 	ultimate_banner_enemy = false
 	queue_redraw()
@@ -351,6 +380,7 @@ func _on_player_ultimate_used(character_index: int) -> void:
 
 func _on_enemy_ultimate_used(character_index: int) -> void:
 	ultimate_banner_timer = 0.85
+	_play_sfx(SFX_ULT)
 	ultimate_banner_character = character_index
 	ultimate_banner_enemy = true
 	queue_redraw()
@@ -521,6 +551,7 @@ func _on_heal_pack_claimed(
 	amount: int
 ) -> void:
 	heal_message_timer = 1.15
+	_play_sfx(SFX_HEAL)
 
 	if by_player:
 		heal_message = "HEAL PACK  +" + str(amount) + " HP"
@@ -539,6 +570,7 @@ func request_impact(
 	_hit_position: Vector2,
 	color: Color
 ) -> void:
+	_play_sfx(SFX_HIT, -6.0 if damage < 40 else -2.0)
 	var strength: float = clampf(
 		float(damage) * 0.095,
 		2.0,
@@ -596,6 +628,37 @@ func is_ai_position_bad(point: Vector2) -> bool:
 			return true
 
 	return false
+
+
+func _play_sfx(
+	stream: AudioStream,
+	volume_db: float = -4.0
+) -> void:
+	if stream == null:
+		return
+
+	var target := sfx_player
+
+	if target != null and target.playing:
+		target = sfx_player_alt
+
+	if target == null:
+		return
+
+	target.stream = stream
+	target.volume_db = volume_db
+	target.play()
+
+
+func notify_basic_attack() -> void:
+	_play_sfx(SFX_BASIC, -8.0)
+
+
+func notify_skill_cast(is_deflect: bool = false) -> void:
+	if is_deflect:
+		_play_sfx(SFX_DEFLECT, -4.0)
+	else:
+		_play_sfx(SFX_SKILL, -6.0)
 
 func _load_stats() -> void:
 	var config := ConfigFile.new()
@@ -1682,6 +1745,18 @@ func _draw_battle_hud(font: Font) -> void:
 		Color(0.55, 1.0, 0.72)
 	)
 
+
+	if heal_pack_timer <= 2.0:
+		draw_string(
+			font,
+			Vector2(0.0, 100.0),
+			"HEAL PACK INCOMING",
+			HORIZONTAL_ALIGNMENT_CENTER,
+			1280.0,
+			18,
+			Color(1.0, 0.90, 0.35)
+		)
+
 	if heal_message_timer > 0.0:
 		draw_string(
 			font,
@@ -2025,6 +2100,35 @@ func _draw_ultimate_banner(font: Font) -> void:
 		29,
 		Color(1.0, 1.0, 1.0, alpha)
 	)
+
+
+	# ULTIMATE VFX: 화면 중앙에서 퍼지는 링/레이
+	# 외부 이미지 없이 코드로 직접 그린다.
+	var center := Vector2(640.0, 346.0)
+	var progress: float = 1.0 - alpha
+	var radius: float = 70.0 + progress * 330.0
+
+	for i in range(3):
+		draw_arc(
+			center,
+			radius + float(i) * 22.0,
+			0.0,
+			TAU,
+			64,
+			Color(c, alpha * (0.28 - float(i) * 0.06)),
+			3.0
+		)
+
+	for i in range(12):
+		var a: float = float(i) * TAU / 12.0 + elapsed * 0.5
+		var dir := Vector2(cos(a), sin(a))
+
+		draw_line(
+			center + dir * 55.0,
+			center + dir * (120.0 + progress * 260.0),
+			Color(c, alpha * 0.18),
+			3.0
+		)
 
 
 func _draw_result_screen(font: Font) -> void:
