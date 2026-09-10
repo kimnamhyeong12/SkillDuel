@@ -54,7 +54,7 @@ var rng := RandomNumberGenerator.new()
 
 @onready var player = $Player
 @onready var enemy = $Enemy
-@onready var camera: Camera2D = $Camera2D
+var camera: Camera2D = null
 
 
 # Main menu
@@ -114,6 +114,17 @@ func _ready() -> void:
 	rng.randomize()
 	_load_stats()
 
+	# v0.8.1 HOTFIX:
+	# 기존 프로젝트에 Camera2D 노드가 없더라도 자동 생성한다.
+	camera = get_node_or_null("Camera2D") as Camera2D
+
+	if camera == null:
+		camera = Camera2D.new()
+		camera.name = "Camera2D"
+		camera.position = SCREEN_SIZE * 0.5
+		camera.enabled = true
+		add_child(camera)
+
 	player.defeated.connect(_on_player_defeated)
 	enemy.defeated.connect(_on_enemy_defeated)
 	player.ultimate_used.connect(_on_player_ultimate_used)
@@ -149,19 +160,20 @@ func _process(delta: float) -> void:
 		impact_flash_timer - delta
 	)
 
-	if impact_shake_timer > 0.0:
-		camera.offset = Vector2(
-			rng.randf_range(
-				-impact_shake_strength,
-				impact_shake_strength
-			),
-			rng.randf_range(
-				-impact_shake_strength,
-				impact_shake_strength
+	if is_instance_valid(camera):
+		if impact_shake_timer > 0.0:
+			camera.offset = Vector2(
+				rng.randf_range(
+					-impact_shake_strength,
+					impact_shake_strength
+				),
+				rng.randf_range(
+					-impact_shake_strength,
+					impact_shake_strength
+				)
 			)
-		)
-	else:
-		camera.offset = Vector2.ZERO
+		else:
+			camera.offset = Vector2.ZERO
 
 	if state == GameState.BATTLE:
 		_update_map_effects(delta)
@@ -360,6 +372,13 @@ func _hide_battle_objects() -> void:
 	_clear_projectiles()
 	_clear_heal_packs()
 	_clear_terrain_effects()
+
+	impact_shake_timer = 0.0
+	impact_shake_strength = 0.0
+	impact_flash_timer = 0.0
+
+	if is_instance_valid(camera):
+		camera.offset = Vector2.ZERO
 
 	player.set_active(false)
 	enemy.set_active(false)
