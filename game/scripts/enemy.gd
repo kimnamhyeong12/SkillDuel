@@ -422,7 +422,7 @@ func _choose_move_target(
 
 		if not _is_bad_position(candidate):
 			candidate = _apply_character_personality(candidate, player)
-	move_target = candidate
+			move_target = candidate
 			return
 
 	# 체력이 낮으면 상대와 x축 거리를 벌린다.
@@ -477,6 +477,10 @@ func _choose_move_target(
 			rng.randf_range(65.0, 225.0)
 		)
 
+	candidate = _apply_character_personality(
+		candidate,
+		player
+	)
 	move_target = candidate
 
 

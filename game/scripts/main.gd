@@ -14,14 +14,6 @@ const RIVER_TOP: float = 280.0
 const RIVER_BOTTOM: float = 440.0
 const STATS_PATH: String = "user://skillduel_stats.cfg"
 const HEAL_PACK_SCENE: PackedScene = preload("res://scenes/HealPack.tscn")
-const SFX_UI: AudioStream = preload("res://assets/audio/ui_click.wav")
-const SFX_BASIC: AudioStream = preload("res://assets/audio/basic_shot.wav")
-const SFX_SKILL: AudioStream = preload("res://assets/audio/skill_cast.wav")
-const SFX_HIT: AudioStream = preload("res://assets/audio/hit.wav")
-const SFX_ULT: AudioStream = preload("res://assets/audio/ult.wav")
-const SFX_HEAL: AudioStream = preload("res://assets/audio/heal.wav")
-const SFX_WARNING: AudioStream = preload("res://assets/audio/warning.wav")
-const SFX_DEFLECT: AudioStream = preload("res://assets/audio/deflect.wav")
 
 const MAP_ARCANE_RIVER: int = 0
 const MAP_RAIN_RUINS: int = 1
@@ -57,6 +49,15 @@ var impact_flash_color: Color = Color.WHITE
 var heal_warning_played: bool = false
 var sfx_player: AudioStreamPlayer = null
 var sfx_player_alt: AudioStreamPlayer = null
+var sfx_ui: AudioStreamWAV = null
+var sfx_basic: AudioStreamWAV = null
+var sfx_skill: AudioStreamWAV = null
+var sfx_hit: AudioStreamWAV = null
+var sfx_ult: AudioStreamWAV = null
+var sfx_heal: AudioStreamWAV = null
+var sfx_warning: AudioStreamWAV = null
+var sfx_deflect: AudioStreamWAV = null
+
 
 var player_terrain_status: String = ""
 var enemy_terrain_status: String = ""
@@ -133,6 +134,33 @@ func _ready() -> void:
 	sfx_player_alt.name = "SFXPlayerAlt"
 	add_child(sfx_player_alt)
 
+
+	# WAV는 preload 대신 AudioStreamWAV 전용 로더로 런타임 로드한다.
+	sfx_ui = AudioStreamWAV.load_from_file(
+		"res://assets/audio/ui_click.wav"
+	)
+	sfx_basic = AudioStreamWAV.load_from_file(
+		"res://assets/audio/basic_shot.wav"
+	)
+	sfx_skill = AudioStreamWAV.load_from_file(
+		"res://assets/audio/skill_cast.wav"
+	)
+	sfx_hit = AudioStreamWAV.load_from_file(
+		"res://assets/audio/hit.wav"
+	)
+	sfx_ult = AudioStreamWAV.load_from_file(
+		"res://assets/audio/ult.wav"
+	)
+	sfx_heal = AudioStreamWAV.load_from_file(
+		"res://assets/audio/heal.wav"
+	)
+	sfx_warning = AudioStreamWAV.load_from_file(
+		"res://assets/audio/warning.wav"
+	)
+	sfx_deflect = AudioStreamWAV.load_from_file(
+		"res://assets/audio/deflect.wav"
+	)
+
 	# v0.8.1 HOTFIX:
 	# 기존 프로젝트에 Camera2D 노드가 없더라도 자동 생성한다.
 	camera = get_node_or_null("Camera2D") as Camera2D
@@ -200,7 +228,7 @@ func _process(delta: float) -> void:
 
 		if heal_pack_timer <= 2.0 and not heal_warning_played:
 			heal_warning_played = true
-			_play_sfx(SFX_WARNING)
+			_play_sfx(sfx_warning)
 
 		if heal_pack_timer > 2.0:
 			heal_warning_played = false
@@ -242,7 +270,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	var pos := mouse_event.position
-	_play_sfx(SFX_UI)
+	_play_sfx(sfx_ui)
 
 	match state:
 		GameState.MAIN_MENU:
@@ -372,7 +400,7 @@ func _on_enemy_defeated() -> void:
 
 func _on_player_ultimate_used(character_index: int) -> void:
 	ultimate_banner_timer = 0.85
-	_play_sfx(SFX_ULT)
+	_play_sfx(sfx_ult)
 	ultimate_banner_character = character_index
 	ultimate_banner_enemy = false
 	queue_redraw()
@@ -380,7 +408,7 @@ func _on_player_ultimate_used(character_index: int) -> void:
 
 func _on_enemy_ultimate_used(character_index: int) -> void:
 	ultimate_banner_timer = 0.85
-	_play_sfx(SFX_ULT)
+	_play_sfx(sfx_ult)
 	ultimate_banner_character = character_index
 	ultimate_banner_enemy = true
 	queue_redraw()
@@ -551,7 +579,7 @@ func _on_heal_pack_claimed(
 	amount: int
 ) -> void:
 	heal_message_timer = 1.15
-	_play_sfx(SFX_HEAL)
+	_play_sfx(sfx_heal)
 
 	if by_player:
 		heal_message = "HEAL PACK  +" + str(amount) + " HP"
@@ -570,7 +598,7 @@ func request_impact(
 	_hit_position: Vector2,
 	color: Color
 ) -> void:
-	_play_sfx(SFX_HIT, -6.0 if damage < 40 else -2.0)
+	_play_sfx(sfx_hit, -6.0 if damage < 40 else -2.0)
 	var strength: float = clampf(
 		float(damage) * 0.095,
 		2.0,
@@ -651,14 +679,14 @@ func _play_sfx(
 
 
 func notify_basic_attack() -> void:
-	_play_sfx(SFX_BASIC, -8.0)
+	_play_sfx(sfx_basic, -8.0)
 
 
 func notify_skill_cast(is_deflect: bool = false) -> void:
 	if is_deflect:
-		_play_sfx(SFX_DEFLECT, -4.0)
+		_play_sfx(sfx_deflect, -4.0)
 	else:
-		_play_sfx(SFX_SKILL, -6.0)
+		_play_sfx(sfx_skill, -6.0)
 
 func _load_stats() -> void:
 	var config := ConfigFile.new()
